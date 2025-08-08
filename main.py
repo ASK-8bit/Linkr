@@ -5,7 +5,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app) # Enable CORS for all routes
+
+# Explicitly configure CORS for all routes to allow all origins and methods
+# This should fix the preflight request issue
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
 
 DATABASE = 'locations.db'
 
@@ -39,8 +42,12 @@ init_db()
 # def home():
 #     return render_template('maps.html')
 
-@app.route('/submit-location', methods=['POST'])
+@app.route('/submit-location', methods=['POST', 'OPTIONS'])
 def submit_location():
+    if request.method == 'OPTIONS':
+        # This is a preflight request, Flask-CORS should handle it
+        return '', 200
+
     data = request.json
     if not data or 'latitude' not in data or 'longitude' not in data or 'user_id' not in data:
         return jsonify({"error": "Invalid data: missing latitude, longitude, or user_id"}), 400
@@ -66,8 +73,12 @@ def submit_location():
         print(f"Error storing/updating location: {e}")
         return jsonify({"error": "Failed to store/update location", "details": str(e)}), 500
 
-@app.route('/get-locations', methods=['GET'])
+@app.route('/get-locations', methods=['GET', 'OPTIONS'])
 def get_locations():
+    if request.method == 'OPTIONS':
+        # This is a preflight request, Flask-CORS should handle it
+        return '', 200
+
     try:
         db = get_db()
         cursor = db.cursor()
