@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Linkr - Location Tracker</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <script src='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js'></script>
+  <link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
+  <style>
+    body { margin: 0; padding: 0; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+    // IMPORTANT: Replace this with your actual Ola Maps API key
+    const apiKey = 'y9J1OvT50pbCrXHQsHQ93UboooPob3W7jJRet18G';
+
+    // Backend URL points to your PythonAnywhere app
+    const backendUrl = 'https://linkr.pythonanywhere.com';
+
+    // Generate or retrieve a persistent user ID
+    let currentUserId = localStorage.getItem('currentUserId');
+    if (!currentUserId) {
+        currentUserId = 'user-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
+        localStorage.setItem('currentUserId', currentUserId);
+    }
+
+    // Initialize the map using the Ola Maps style URL
+    const map = new maplibregl.Map({
+        container: 'map',
+        style: `https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json`, // API key will be added by transformRequest
+        center: [78.9629, 20.5937], // Default center (India)
+        zoom: 4,
+        transformRequest: (url, resourceType) => {
+            // Only modify requests to Ola Maps API
+            if (url.startsWith('https://api.olamaps.io/')) {
+                let modifiedUrl = url;
+                // Append API key if not already present
+                if (!url.includes("api_key=")) {
+                    modifiedUrl = `${url}${url.includes("?") ? "&" : "?"}api_key=${apiKey}`;
+                }
+                return { url: modifiedUrl };
+            }
+            return { url };
+        }
+    });
+
+    let userMarker = null; // To store the current user's marker
+    let otherUserMarkers = {}; // Use an object to store markers by user_id for easy update
+
+    // Function to send current location to backend
+    function sendLocation(position) {
+        const userLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            timestamp: new Date().toISOString(),
+            user_id: currentUserId // Use the persistent user ID
+        };
+
+        fetch(`${backendUrl}/submit-location`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(userLocation),
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Location sent to backend:', data);
+            // Update own marker if it's the first time or location changed significantly
+            if (!userMarker) {
+                userMarker = new maplibregl.Marker({ color: 'blue' }) // Blue for own location
+                    .setLngLat([userLocation.longitude, userLocation.latitude])
+                    .setPopup(new maplibregl.Popup().setText('You are here!'))
+                    .addTo(map);
+            } else {
+                userMarker.setLngLat([userLocation.longitude, userLocation.latitude]);
+            }
+            map.setCenter([userLocation.longitude, userLocation.latitude]);
+            map.setZoom(15);
+        })
+        .catch((error) => {
+            console.error('Error sending location to backend:', error);
+        });
+    }
+
+    // Function to fetch and display all locations from backend
+    function fetchAndDisplayAllLocations() {
+        fetch(`${backendUrl}/get-locations`)
+            .then(response => response.json())
+            .then(locations => {
+                console.log('All locations from backend:', locations);
+
+                // Keep track of active user IDs from the fetched data
+                const activeUserIds = new Set();
+
+                locations.forEach(loc => {
+                    activeUserIds.add(loc.user_id);
+
+                    if (loc.user_id === currentUserId) {
+                        // This is the current user's location, update blue marker
+                        if (!userMarker) {
+                            userMarker = new maplibregl.Marker({ color: 'blue' })
+                                .setLngLat([loc.longitude, loc.latitude])
+                                .setPopup(new maplibregl.Popup().setText('You are here!'))
+                                .addTo(map);
+                        } else {
+                            userMarker.setLngLat([loc.longitude, loc.latitude]);
+                        }
+                    } else {
+                        // This is another user's location (red marker)
+                        if (otherUserMarkers[loc.user_id]) {
+                            // Update existing marker
+                            otherUserMarkers[loc.user_id].setLngLat([loc.longitude, loc.latitude]);
+                        } else {
+                            // Create new marker
+                            const newMarker = new maplibregl.Marker({ color: 'red' })
+                                .setLngLat([loc.longitude, loc.latitude])
+                                .setPopup(new maplibregl.Popup().setText(`User at ${loc.latitude.toFixed(2)}, ${loc.longitude.toFixed(2)}`))
+                                .addTo(map);
+                            otherUserMarkers[loc.user_id] = newMarker;
+                        }
+                    }
+                });
+
+                // Remove markers for users who are no longer reporting (e.g., closed their tab)
+                for (const userId in otherUserMarkers) {
+                    if (!activeUserIds.has(userId)) {
+                        otherUserMarkers[userId].remove();
+                        delete otherUserMarkers[userId];
+                    }
+                }
+            })
+            .catch((error) => {
+                console.error('Error fetching locations from backend:', error);
+            });
+    }
+
+    // Initial location request and periodic updates
+    map.on('load', () => {
+        if (navigator.geolocation) {
+            // Request high accuracy location
+            navigator.geolocation.getCurrentPosition(sendLocation, (error) => {
+                console.error("Error getting user location:", error);
+                alert("Error getting user location. Please make sure you have enabled location services.");
+            }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }); // Added options
+
+            // Periodically fetch and display all locations (e.g., every 5 seconds)
+            setInterval(fetchAndDisplayAllLocations, 5000);
+
+        } else {
+            console.log("Geolocation is not supported by this browser.");
+            alert("Geolocation is not supported by this browser.");
+        }
+    });
+</script>
+</body>
+</html>
