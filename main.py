@@ -1,14 +1,13 @@
 # main.py
 import os
 import sqlite3
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask import Flask, request, jsonify, render_template
+# Removed Flask-CORS import as it's no longer needed for same-origin hosting
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 
-# Explicitly configure CORS for all routes to allow all origins and methods
-# This should fix the preflight request issue
-CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
+# Removed explicit CORS configuration as it's no longer needed
+# CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
 
 DATABASE = 'locations.db'
 
@@ -37,17 +36,14 @@ def init_db():
 # Initialize the database when the app starts
 init_db()
 
-# We are no longer serving maps.html from here
-# @app.route('/')
-# def home():
-#     return render_template('maps.html')
+# This route will now serve the index.html from the templates folder
+@app.route('/')
+def home():
+    return render_template('index.html')
 
-@app.route('/submit-location', methods=['POST', 'OPTIONS'])
+@app.route('/submit-location', methods=['POST'])
 def submit_location():
-    if request.method == 'OPTIONS':
-        # This is a preflight request, Flask-CORS should handle it
-        return '', 200
-
+    # Removed OPTIONS method and preflight handling as CORS is no longer an issue
     data = request.json
     if not data or 'latitude' not in data or 'longitude' not in data or 'user_id' not in data:
         return jsonify({"error": "Invalid data: missing latitude, longitude, or user_id"}), 400
@@ -73,12 +69,9 @@ def submit_location():
         print(f"Error storing/updating location: {e}")
         return jsonify({"error": "Failed to store/update location", "details": str(e)}), 500
 
-@app.route('/get-locations', methods=['GET', 'OPTIONS'])
+@app.route('/get-locations', methods=['GET'])
 def get_locations():
-    if request.method == 'OPTIONS':
-        # This is a preflight request, Flask-CORS should handle it
-        return '', 200
-
+    # Removed OPTIONS method and preflight handling as CORS is no longer an issue
     try:
         db = get_db()
         cursor = db.cursor()
