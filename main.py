@@ -2,12 +2,9 @@
 import os
 import sqlite3
 from flask import Flask, request, jsonify, render_template
-# Removed Flask-CORS import as it's no longer needed for same-origin hosting
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__, template_folder='templates')
-
-# Removed explicit CORS configuration as it's no longer needed
-# CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
 
 DATABASE = 'locations.db'
 
@@ -20,7 +17,7 @@ def init_db():
     with app.app_context():
         db = get_db()
         cursor = db.cursor()
-        # Ensure user_id is UNIQUE for INSERT OR REPLACE to work correctly
+        # Create locations table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS locations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,20 +27,51 @@ def init_db():
                 user_id TEXT UNIQUE
             )
         ''')
+        # Create users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL
+            )
+        ''')
         db.commit()
         db.close()
 
 # Initialize the database when the app starts
 init_db()
 
-# This route will now serve the index.html from the templates folder
 @app.route('/')
 def home():
     return render_template('index.html')
 
+@app.route('/api/register', methods=['POST'])
+def register_user():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+
+    hashed_password = generate_password_hash(password)
+
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, hashed_password))
+        db.commit()
+        user_id = cursor.lastrowid
+        db.close()
+        return jsonify({"message": "User registered successfully", "user_id": user_id}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Username already exists"}), 409
+    except Exception as e:
+        print(f"Error during registration: {e}")
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
 @app.route('/submit-location', methods=['POST'])
 def submit_location():
-    # Removed OPTIONS method and preflight handling as CORS is no longer an issue
     data = request.json
     if not data or 'latitude' not in data or 'longitude' not in data or 'user_id' not in data:
         return jsonify({"error": "Invalid data: missing latitude, longitude, or user_id"}), 400
@@ -71,7 +99,6 @@ def submit_location():
 
 @app.route('/get-locations', methods=['GET'])
 def get_locations():
-    # Removed OPTIONS method and preflight handling as CORS is no longer an issue
     try:
         db = get_db()
         cursor = db.cursor()

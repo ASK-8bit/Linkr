@@ -2,55 +2,131 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Linkr - Location Tracker</title>
+  <title>Linkr - Register</title>
   <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
   <script src='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js'></script>
   <link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
   <style>
-    body { margin: 0; padding: 0; }
-    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    body { margin: 0; padding: 0; font-family: sans-serif; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; display: none; } /* Hidden by default */
+    #auth-container { 
+        display: flex; 
+        flex-direction: column; 
+        align-items: center; 
+        justify-content: center; 
+        height: 100vh; 
+        width: 100%; 
+        background-color: #f0f2f5;
+    }
+    #auth-box {
+        background-color: white;
+        padding: 30px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        text-align: center;
+    }
+    #auth-box input {
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 15px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+    }
+    #auth-box button {
+        width: 100%;
+        padding: 10px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+    #auth-box button:hover {
+        background-color: #0056b3;
+    }
+    #message { margin-top: 15px; color: red; }
   </style>
 </head>
 <body>
-<div id="map"></div>
+
+  <div id="auth-container">
+    <div id="auth-box">
+      <h2>Register for Linkr</h2>
+      <form id="register-form">
+        <input type="text" id="username" placeholder="Username" required>
+        <input type="password" id="password" placeholder="Password" required>
+        <button type="submit">Register</button>
+      </form>
+      <p id="message"></p>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
 <script>
     // IMPORTANT: Replace this with your actual Ola Maps API key
     const apiKey = 'y9J1OvT50pbCrXHQsHQ93UboooPob3W7jJRet18G';
 
-    // Backend URL is now relative to the same server serving this HTML
-    const backendUrl = '';
+    // Backend URL points to your PythonAnywhere app
+    const backendUrl = 'https://linkr.pythonanywhere.com';
 
-    // Generate or retrieve a persistent user ID
+    // Persistent user ID (will be set after successful registration/login)
     let currentUserId = localStorage.getItem('currentUserId');
-    if (!currentUserId) {
-        currentUserId = 'user-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
-        localStorage.setItem('currentUserId', currentUserId);
-    }
 
-    // Initialize the map using the Ola Maps style URL
-    const map = new maplibregl.Map({
-        container: 'map',
-        style: `https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json`, // API key will be added by transformRequest
-        center: [78.9629, 20.5937], // Default center (India)
-        zoom: 4,
-        transformRequest: (url, resourceType) => {
-            // Only modify requests to Ola Maps API
-            if (url.startsWith('https://api.olamaps.io/')) {
-                let modifiedUrl = url;
-                // Append API key if not already present
-                if (!url.includes("api_key=")) {
-                    modifiedUrl = `${url}${url.includes("?") ? "&" : "?"}api_key=${apiKey}`;
-                }
-                return { url: modifiedUrl };
-            }
-            return { url };
-        }
-    });
+    // --- UI Elements ---
+    const authContainer = document.getElementById('auth-container');
+    const registerForm = document.getElementById('register-form');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const messageElement = document.getElementById('message');
+    const mapElement = document.getElementById('map');
 
+    // --- Map Initialization (moved inside a function) ---
+    let map = null;
     let userMarker = null; // To store the current user's marker
     let otherUserMarkers = {}; // Use an object to store markers by user_id for easy update
 
-    // Function to send current location to backend
+    function initializeMap() {
+        mapElement.style.display = 'block'; // Show the map
+        authContainer.style.display = 'none'; // Hide auth form
+        document.title = 'Linkr - Map'; // Change page title
+
+        map = new maplibregl.Map({
+            container: 'map',
+            style: `https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json`, // API key will be added by transformRequest
+            center: [78.9629, 20.5937], // Default center (India)
+            zoom: 4,
+            transformRequest: (url, resourceType) => {
+                if (url.startsWith('https://api.olamaps.io/')) {
+                    let modifiedUrl = url;
+                    if (!url.includes("api_key=")) {
+                        modifiedUrl = `${url}${url.includes("?") ? "&" : "?"}api_key=${apiKey}`;
+                    }
+                    return { url: modifiedUrl };
+                }
+                return { url };
+            }
+        });
+
+        map.on('load', () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(sendLocation, (error) => {
+                    console.error("Error getting user location:", error);
+                    alert("Error getting user location. Please make sure you have enabled location services.");
+                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+
+                setInterval(fetchAndDisplayAllLocations, 5000);
+
+            } else {
+                console.log("Geolocation is not supported by this browser.");
+                alert("Geolocation is not supported by this browser.");
+            }
+        });
+    }
+
+    // --- Location Sending/Fetching Functions (unchanged) ---
     function sendLocation(position) {
         const userLocation = {
             latitude: position.coords.latitude,
@@ -69,9 +145,8 @@
         .then(response => response.json())
         .then(data => {
             console.log('Location sent to backend:', data);
-            // Update own marker if it's the first time or location changed significantly
             if (!userMarker) {
-                userMarker = new maplibregl.Marker({ color: 'blue' }) // Blue for own location
+                userMarker = new maplibregl.Marker({ color: 'blue' })
                     .setLngLat([userLocation.longitude, userLocation.latitude])
                     .setPopup(new maplibregl.Popup().setText('You are here!'))
                     .addTo(map);
@@ -86,21 +161,18 @@
         });
     }
 
-    // Function to fetch and display all locations from backend
     function fetchAndDisplayAllLocations() {
         fetch(`${backendUrl}/get-locations`)
             .then(response => response.json())
             .then(locations => {
                 console.log('All locations from backend:', locations);
 
-                // Keep track of active user IDs from the fetched data
                 const activeUserIds = new Set();
 
                 locations.forEach(loc => {
                     activeUserIds.add(loc.user_id);
 
                     if (loc.user_id === currentUserId) {
-                        // This is the current user's location, update blue marker
                         if (!userMarker) {
                             userMarker = new maplibregl.Marker({ color: 'blue' })
                                 .setLngLat([loc.longitude, loc.latitude])
@@ -110,12 +182,9 @@
                             userMarker.setLngLat([loc.longitude, loc.latitude]);
                         }
                     } else {
-                        // This is another user's location (red marker)
                         if (otherUserMarkers[loc.user_id]) {
-                            // Update existing marker
                             otherUserMarkers[loc.user_id].setLngLat([loc.longitude, loc.latitude]);
                         } else {
-                            // Create new marker
                             const newMarker = new maplibregl.Marker({ color: 'red' })
                                 .setLngLat([loc.longitude, loc.latitude])
                                 .setPopup(new maplibregl.Popup().setText(`User at ${loc.latitude.toFixed(2)}, ${loc.longitude.toFixed(2)}`))
@@ -125,7 +194,6 @@
                     }
                 });
 
-                // Remove markers for users who are no longer reporting (e.g., closed their tab)
                 for (const userId in otherUserMarkers) {
                     if (!activeUserIds.has(userId)) {
                         otherUserMarkers[userId].remove();
@@ -138,23 +206,49 @@
             });
     }
 
-    // Initial location request and periodic updates
-    map.on('load', () => {
-        if (navigator.geolocation) {
-            // Request high accuracy location
-            navigator.geolocation.getCurrentPosition(sendLocation, (error) => {
-                console.error("Error getting user location:", error);
-                alert("Error getting user location. Please make sure you have enabled location services.");
-            }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }); // Added options
+    // --- Registration Logic ---
+    registerForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        messageElement.textContent = ''; // Clear previous messages
 
-            // Periodically fetch and display all locations (e.g., every 5 seconds)
-            setInterval(fetchAndDisplayAllLocations, 5000);
+        const username = usernameInput.value;
+        const password = passwordInput.value;
 
-        } else {
-            console.log("Geolocation is not supported by this browser.");
-            alert("Geolocation is not supported by this browser.");
+        try {
+            const response = await fetch(`${backendUrl}/api/register`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username, password }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                messageElement.style.color = 'green';
+                messageElement.textContent = data.message + ". Initializing map...";
+                currentUserId = data.user_id; // Store the user_id from backend
+                localStorage.setItem('currentUserId', currentUserId); // Persist it
+                setTimeout(initializeMap, 2000); // Delay to show message
+            } else {
+                messageElement.style.color = 'red';
+                messageElement.textContent = data.error || 'Registration failed';
+            }
+        } catch (error) {
+            console.error('Network error during registration:', error);
+            messageElement.style.color = 'red';
+            messageElement.textContent = 'Network error. Please try again.';
         }
     });
+
+    // --- Initial Check (if already registered/logged in) ---
+    // For now, if currentUserId exists, assume logged in and initialize map
+    // Later, we'll add a proper login check here
+    if (currentUserId) {
+        initializeMap();
+    }
+
 </script>
 </body>
 </html>
